@@ -153,9 +153,8 @@ def print_bin_file(input_bin_file):
     - sample_rate (int, optional): Sample rate (e.g., CD-quality audio). Default is 44100.
     """
     audio_array = np.load(input_bin_file)
-    print(audio_array)
-
-    print(f"WAV file saved as {input_bin_file}")
+    for i in range(100):
+        print(audio_array[i])
 
 
 def encode_folder(input_folder, output_folder):
@@ -174,26 +173,6 @@ def encode_folder(input_folder, output_folder):
             save_array_to_bin_file(os.path.join(output_folder, file), song)
         else:
             continue
-
-
-# Generate a random WAV file
-# output_file = "random_audio.wav"
-# duration_seconds = 5
-# generate_random_wav_file(output_file, duration_seconds)
-
-# song, samplerate = convert_wav_to_array("bellfigo.wav")
-
-# save_array_to_txt_file("non pago affitto.txt", song)
-# convert_txt_to_wav("non pago affitto.txt", "bellofigo.wav", sample_rate=samplerate)
-
-# for each file in inputs folder convert it to array and save it to outputs folder
-# for file in os.listdir(INPUTS_FOLDER):
-#    if file.endswith(".wav"):
-#        print("Converting file: ", file)
-#        song, samplerate = convert_wav_to_array(os.path.join(INPUTS_FOLDER, file))
-#        save_array_to_bin_file(os.path.join(OUTPUTS_FOLDER, file), song)
-#    else:
-#        continue
 
 
 def main(argv):

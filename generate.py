@@ -1,16 +1,21 @@
 import torch
-import numpy as np
-from torch import nn
+import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
 import os
+import numpy as np
 from progress.bar import Bar
+from torch.optim import lr_scheduler
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
+if not os.path.exists("unique_notes.txt"):
+    print("No unique notes file found. Please run train.py first.")
+else:
+    output_len = int(np.loadtxt("unique_notes.txt"))
 
-# Load the trained model
+
+# Define a simple LSTM-based music generation model
 class MusicGenerator(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, output_size):
         super(MusicGenerator, self).__init__()
@@ -20,77 +25,95 @@ class MusicGenerator(nn.Module):
     def forward(self, x, h):
         out, (hn, cn) = self.lstm(x, h)
         out = self.fc(out)
+        out = torch.tanh(out)  # Apply tanh activation function
         return out, (hn, cn)
 
 
-model = MusicGenerator(1, 64, 2, 1).to(device)
+# Load model "model_state.pth"
+model = MusicGenerator(1, 64, 2, output_len).to(device)
+
 model.load_state_dict(torch.load("model_state.pth"))
 
-# Define the initial note
-initial_note = 0.5
+# Generate a new song
 
-seed_sequence = (
-    torch.tensor([initial_note], dtype=torch.float).view(1, 1, -1).to(device)
-)
-hidden_state = None
+HZ = 44100
+DURATION = 10
+CHANNELS = 2
+SAMPLE_WIDTH = 2
 
-generated_music = []
+VALUES_PER_SECOND = HZ * CHANNELS * SAMPLE_WIDTH
 
-# Generate a sequence of notes in 1-second chunks
-chunk_size = 44100
-num_chunks = 7
-chunks_per_file = 2
+# Initialize the hidden state
+h = torch.zeros(2, 1, 64).to(device)
+c = torch.zeros(2, 1, 64).to(device)
+h = (h, c)
 
-# Predict the next note in the sequence
-predicted_note, hidden_state = model(seed_sequence, hidden_state)
-for x in range(num_chunks):
-    for y in range(chunk_size):
-        predicted_note, hidden_state = model(seed_sequence, hidden_state)
-        print(predicted_note)
-"""
-with Bar("Generating music", max=num_chunks) as bar:
-    for chunk_idx in range(num_chunks):
-        chunk_music = []
-        for _ in range(chunk_size):
-            output, hidden_state = model(seed_sequence, hidden_state)
+# Initialize the first input
+x = torch.zeros(1, 1, 1).to(device)
 
-            # Sample the next note from the output distribution
-            next_note = torch.argmax(output, dim=2)
+# Generate the song note by note
+song = []
 
-            # Convert the note to a float between 0 and 1
-            next_note = next_note.float() / 127
+print("Generating song...")
 
-            # Add the note to the generated music
-            generated_music.append(next_note.item())
+with Bar("Generating", max=VALUES_PER_SECOND * DURATION) as bar:
+    # Create a temporary directory to store the generated music files
+    if not os.path.exists("temp"):
+        os.makedirs("temp")
 
-            # Update the seed sequence for the next iteration
-            seed_sequence = next_note.view(1, 1, -1)
+    for j in range(DURATION):
+        song = []
+        for i in range(VALUES_PER_SECOND):
+            out, h = model(x, h)
 
-            chunk_music.append(next_note.item())
+            # Get the index of the most likely note index
+            temperature = 0.8  # You can experiment with different temperature values
+            scaled_logits = out[0, 0] / temperature
+            note_index = torch.multinomial(
+                torch.softmax(scaled_logits, dim=-1), 1
+            ).item()
+            # Get the value of the most likely note
+            note = torch.tensor([[note_index]], dtype=torch.float).to(device)
 
-        bar.next()
+            # Add the note to the song
+            song.append(note)
 
-        # Save the generated music to a temporary numpy file every 2 chunks
-        if (chunk_idx + 1) % chunks_per_file == 0 or chunk_idx == num_chunks - 1:
-            temp_file_path = f"temp/{chunk_idx // chunks_per_file + 1:03}.npy"
-            os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
-            np.save(temp_file_path, np.array(chunk_music))
+            # Use the generated note as the input to the next iteration
+            x = torch.tensor([[[note]]], dtype=torch.float).to(device)
 
-            # Deallocate the VRAM
-            del model
-            torch.cuda.empty_cache()
-            model = MusicGenerator(1, 64, 2, 1).to(device)
-            model.load_state_dict(torch.load("model_state.pth"))
-            hidden_state = None
+            # Update the progress bar
+            bar.next()
 
-# Concatenate the generated music from the temporary numpy files
-generated_music = []
-for chunk_idx in range(num_chunks // chunks_per_file):
-    temp_file_path = f"temp/{chunk_idx+1:03}.npy"
-    chunk_music = np.load(temp_file_path)
-    generated_music += chunk_music.tolist()
-    os.remove(temp_file_path)
+        # Convert the song to a NumPy array
+        song = np.array([note.cpu().numpy() for note in song])
 
-# Save the final generated music to a numpy file
-np.save("generated_music.npy", np.array(generated_music))
-"""
+        # Save the song to a temporary file
+        np.save(f"temp/song_{j}.npy", song)
+
+        del out  # Delete variables to free up memory
+        torch.cuda.empty_cache()  # Empty GPU cache
+
+    # Concatenate the temporary files to create the output file
+    generated_music = np.concatenate(
+        [np.load(f"temp/song_{j}.npy") for j in range(DURATION)]
+    )
+
+    # Map integers to continuous target values
+    generated_music = (generated_music / (output_len - 1) * 2) - 1
+
+    # The array is currently as [[[note]], [[note]], ...]. Remove the extra dimension
+    generated_music = generated_music[:, 0, :]
+
+    # Save the output file
+    np.save("generated_music.npy", generated_music)
+
+    # Remove the temporary directory and files
+    for j in range(DURATION):
+        os.remove(f"temp/song_{j}.npy")
+    os.rmdir("temp")
+
+# Convert the song to a NumPy array
+song = np.array(song)
+
+# Save the song to a file
+np.save("generated_music.npy", song)

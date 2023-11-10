@@ -4,9 +4,29 @@ import torch.optim as optim
 import os
 import numpy as np
 from progress.bar import Bar
+from torch.optim import lr_scheduler
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
+
+# Get the number of unique notes in the dataset
+# get all the files in the outputs folder
+INPUTS_FOLDER = "outputs/"
+
+if not os.file.exists("unique_notes.txt"):
+    notes = np.array([])
+
+    for files in os.listdir(INPUTS_FOLDER):
+        song = np.load(INPUTS_FOLDER + files)
+        notes = np.append(notes, song)
+
+    # get the unique notes
+    unique_notes = np.unique(notes)
+    output_len = len(unique_notes)
+
+    np.savetxt("unique_notes.txt", output_len)
+else:
+    output_len = np.loadtxt("unique_notes.txt")
 
 
 # Define a simple LSTM-based music generation model
@@ -27,71 +47,71 @@ class MusicGenerator(nn.Module):
 input_size = 1  # Size of the input (e.g., a single note)
 hidden_size = 64  # Size of the LSTM hidden state
 num_layers = 2  # Number of LSTM layers
-output_size = 1  # Size of the output (e.g., the next note)
+output_size = output_len  # Size of the network output (e.g., a single note)
 
 # Initialize the model
 model = MusicGenerator(input_size, hidden_size, num_layers, output_size).to(device)
 
 # Define loss and optimizer
-criterion = nn.MSELoss()
+criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
+scheduler = lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
 
-# Use mixed precision training
-scaler = torch.cuda.amp.GradScaler()
+# Use mixed precision training (if available)
+scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
 
 # Training loop (you'll need to provide your own music dataset)
-num_epochs = 4
-batch_size = 16384 * 64  # Reduce the batch size to reduce memory usage
+model.train()
+num_epochs = 1
+batch_size = 2**12  # Reduce the batch size to reduce memory usage
 for epoch in range(num_epochs):
     print(f"Epoch {epoch + 1} of {num_epochs}")
-    # Load a batch of training data
-
-    # Load 10 numpy arrays of shape (song_length, 1)
-    # Each array represents a song, and each element in the array represents a note
 
     INPUTS_FOLDER = "outputs/"
 
     for file in os.listdir(INPUTS_FOLDER):
         song = np.load(INPUTS_FOLDER + file)
-        # transform the song into a tensor
         song = torch.tensor(song, dtype=torch.float).view(1, -1, 1).to(device)
 
-        # Find the minimum length of the song
         min_length = song.shape[1]
-
-        # Trim the song to the same length
         song = song[:, :min_length, :]
 
-        # Initialize the hidden state
         hidden_state = None
-
-        # Initialize the input sequence
         initial_note = song[0][0]
 
-        # Prepare input and target sequences
         input_seq = song[:, :-1]
         target_seq = song[:, 1:]
 
-        # Split the input and target sequences into batches
+        # Map continuous target values to integers
+        target_integers = ((target_seq + 1) / 2 * (output_size - 1)).round().long()
+
         input_batches = torch.split(input_seq, batch_size, dim=1)
-        target_batches = torch.split(target_seq, batch_size, dim=1)
+        target_batches = torch.split(target_integers, batch_size, dim=1)
 
         # Forward pass
         with Bar("Processing " + file, max=len(input_batches)) as bar:
             for i in range(len(input_batches)):
                 input_batch = input_batches[i]
                 target_batch = target_batches[i]
-                # progress bar to track the training progress
                 bar.next()
-                with torch.cuda.amp.autocast():
+
+                # Ensure target values are within the correct range
+                target_batch = torch.clamp(target_batch, 0, output_size - 1)
+
+                with torch.cuda.amp.autocast(enabled=device.type == "cuda"):
                     outputs, _ = model(input_batch, hidden_state)
+                    # Flatten the outputs and targets for the CrossEntropyLoss
+                    outputs = outputs.view(-1, output_size)
+                    target_batch = target_batch.view(-1)
                     loss = criterion(outputs, target_batch)
 
-                # Backpropagation and optimization
                 optimizer.zero_grad()
                 scaler.scale(loss).backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
                 scaler.step(optimizer)
                 scaler.update()
+                scheduler.step()
+
 
 # Save the model
 torch.save(model.state_dict(), "model_state.pth")
