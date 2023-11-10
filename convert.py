@@ -1,6 +1,4 @@
 # BEGIN: 3d8f4b5fjw9c
-import random
-import ffmpeg
 import numpy as np
 from pydub import AudioSegment
 import wave
