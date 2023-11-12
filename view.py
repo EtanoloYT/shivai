@@ -13,9 +13,9 @@ def view_song(song):
         print(song)
 
 
-def plot_song(song):
+def plot_song(song, detail=10000):
     song = np.load(song)
-    song = song[::]
+    song = song[::detail]
     plt.figure(figsize=(20, 5))
     plt.plot(song)
     plt.show()
@@ -32,8 +32,9 @@ def main(argv):
         """
         argv1: plot
         argv2: input file
+        argv3: detail
         """
-        plot_song(argv[2])
+        plot_song(argv[2], int(argv[3]))
 
 
 if __name__ == "__main__":
