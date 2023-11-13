@@ -1,4 +1,3 @@
-# BEGIN: 3d8f4b5fjw9c
 import numpy as np
 from pydub import AudioSegment
 import wave
@@ -8,7 +7,7 @@ import os
 import sys
 
 
-def generate_random_wav_file(output_file, duration_seconds, sample_rate=44100):
+def generate_random_wav_file(output_file, duration_seconds, sample_rate=48000):
     """
     Generate a random WAV audio file.
 
@@ -50,7 +49,7 @@ def play_wav_file_with_ffmpeg(input_wav_file):
         print(f"Error: {e}")
 
 
-def convert_wav_to_array(input_wav_file, sample_rate=44100):
+def convert_wav_to_array(input_wav_file, sample_rate=48000):
     """
     Convert a WAV audio file to a NumPy array.
 
@@ -67,7 +66,7 @@ def convert_wav_to_array(input_wav_file, sample_rate=44100):
     return audio_array, audio.frame_rate
 
 
-def convert_txt_to_wav(input_txt_file, output_wav_file, sample_rate=44100):
+def convert_txt_to_wav(input_txt_file, output_wav_file, sample_rate=48000):
     """
     Convert a text file to a WAV audio file.
 
@@ -118,7 +117,7 @@ def save_array_to_bin_file(output_file, audio_array):
     print(f"Audio array saved as {output_file}")
 
 
-def convert_bin_to_wav(input_bin_file, output_wav_file, sample_rate=44100):
+def convert_bin_to_wav(input_bin_file, output_wav_file, sample_rate=48000):
     """
     Convert a text file to a WAV audio file.
 
