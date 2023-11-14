@@ -5,23 +5,21 @@ import os
 import numpy as np
 from progress.bar import Bar
 from torch.optim import lr_scheduler
-from concurrent.futures import ProcessPoolExecutor
-from MusicGenerator import MusicGenerator
+from models.MusicGenerator import MusicGenerator
 
+# Set device to GPU or CPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
 
-SAMPLE_RATE = 48000
-SAMPLE_WIDTH = 2
-CHANNELS = 2
-INPUT_SIZE = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS
-# The output should be the next second of music (i.e., the next 44100 * 2 * 2 bytes)
+SAMPLE_RATE = 48000  # CD-quality audio
+SAMPLE_WIDTH = 2  # 2 bytes per sample
+CHANNELS = 2  # Stereo
+INPUT_SIZE = SAMPLE_RATE * SAMPLE_WIDTH * CHANNELS  # 1 second of audio
 OUTPUT_SIZE = INPUT_SIZE
-HIDDEN_SIZE = 128
+HIDDEN_SIZE = 256  # Number of hidden units in the LSTM
 
 # Define a LSTM based music generation model:
 
-model = MusicGenerator(INPUT_SIZE, HIDDEN_SIZE, 2, OUTPUT_SIZE).to(device)
+model = MusicGenerator(INPUT_SIZE, HIDDEN_SIZE, 7, OUTPUT_SIZE).to(device)
 
 # Define loss and optimizer
 criterion = nn.CrossEntropyLoss()
@@ -31,16 +29,18 @@ scheduler = lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
 # Use mixed precision training (if available)
 scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
 
-num_epochs = 1
-model.train()
-batch_size = 2**12  # Reduce the batch size to reduce memory usage
+num_epochs = 1  # Increase the number of epochs to train for longer so the model can learn more complex patterns
+model.train()  # Set the model to training mode
 
 # Training loop (you'll need to provide your own music dataset)
+INPUTS_FOLDER = "outputs/"
+
+accumulation_steps = (
+    4  # Perform a backward pass only after accumulating this many steps
+)
 
 for epoch in range(num_epochs):
     print(f"Epoch {epoch + 1} of {num_epochs}")
-
-    INPUTS_FOLDER = "outputs/"
 
     for file in os.listdir(INPUTS_FOLDER):
         song = np.load(INPUTS_FOLDER + file)
@@ -66,13 +66,16 @@ for epoch in range(num_epochs):
                     # Compute the loss
                     loss = criterion(output, target_seq)
 
-                # Backprop and perform Adam optimisation
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+                # Backward every accumulation steps
+                if (i + 1) % accumulation_steps == 0:
+                    # Perform gradient descent
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+
                 bar.next(SEQUENCE_LENGTH)
 
     # Save the model after each epoch
-    torch.save(model.state_dict(), f"model_state{epoch}.pth")
+    torch.save(model.state_dict(), "checkpoints/" + f"model_state{epoch}.pth")
     print(f"Saved model_state{epoch}.pth")
